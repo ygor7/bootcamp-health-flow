@@ -1,0 +1,103 @@
+name: Health Flow - DevSecOps Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  security-build:
+    name: Security & Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    outputs:
+      docker_tag: ${{ steps.vars.outputs.sha_short }}
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      # 1. Qualidade de Código (Qodana)
+      - name: Qodana Scan
+        uses: JetBrains/qodana-action@v2023.3
+        with:
+          args: --linter,jetbrains/qodana-python-community
+          push-fixes: none
+
+      # 2. Configurar AWS
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Set Tag
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      # 3. Build & Scan - Core App
+      - name: Build Core Image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPO: health-flow-core
+          TAG: ${{ steps.vars.outputs.sha_short }}
+        run: |
+          aws ecr describe-repositories --repository-names $ECR_REPO || aws ecr create-repository --repository-name $ECR_REPO
+          docker build -t $ECR_REGISTRY/$ECR_REPO:$TAG ./src/core-app
+
+      - name: Trivy Vulnerability Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ steps.login-ecr.outputs.registry }}/health-flow-core:${{ steps.vars.outputs.sha_short }}'
+          trivy-config: trivy.yaml
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy Results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Push Core Image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPO: health-flow-core
+          TAG: ${{ steps.vars.outputs.sha_short }}
+        run: docker push $ECR_REGISTRY/$ECR_REPO:$TAG
+
+  infra-deploy:
+    name: Provision Infrastructure
+    needs: security-build
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_REGION: us-east-1
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init
+
+      - name: Terraform Apply
+        working-directory: ./terraform
+        run: terraform apply -auto-approve

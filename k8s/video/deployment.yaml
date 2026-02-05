@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: video-app
+  namespace: health-video
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: video-system
+  template:
+    metadata:
+      labels:
+        app: video-system
+    spec:
+      containers:
+      - name: app
+        image: k8s.gcr.io/echoserver:1.4 # Placeholder seguro
+        ports:
+        - containerPort: 8080

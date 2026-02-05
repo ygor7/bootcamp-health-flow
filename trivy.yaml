@@ -1,0 +1,11 @@
+format: table
+exit-code: 1
+severity:
+  - CRITICAL
+  - HIGH
+vulnerability:
+  type:
+    - os
+    - library
+ignore-unfixed: true
+timeout: 10m
