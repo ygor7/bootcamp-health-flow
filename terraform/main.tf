@@ -1,19 +1,16 @@
 data "aws_availability_zones" "available" {}
 data "aws_caller_identity" "current" {}
 
-# --- DEFINIÇÃO DAS ROLES (Garantia de Fallback) ---
+# --- DEFINIÇÃO DAS ROLES ---
 locals {
-  # 1. A Role Padrão do Academy (Tentativa Principal)
+  # Role Padrão do Academy
   lab_role_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/LabRole"
 
-  # 2. As Roles Específicas que você forneceu (Segurança)
-  # Se a LabRole falhar, troque as variáveis 'used_cluster_role' e 'used_node_role' abaixo por estas
+  # Roles Específicas (Backup)
   specific_cluster_role = "arn:aws:iam::074442581040:role/c196815a5042644l13691097t1w074442-LabEksClusterRole-z4U15qTttNJF"
   specific_node_role    = "arn:aws:iam::074442581040:role/c196815a5042644l13691097t1w074442581-LabEksNodeRole-gSRwpwgLZvgg"
 
-  # --- CONFIGURAÇÃO ATIVA ---
-  # Mude aqui se o 'terraform apply' der erro de permissão com a LabRole
-  # Padrão: local.lab_role_arn
+  # Configuração Ativa (Padrão: LabRole)
   used_cluster_role = local.lab_role_arn
   used_node_role    = local.lab_role_arn
 }
@@ -50,12 +47,21 @@ module "eks" {
 
   cluster_endpoint_public_access = true
 
-  # --- CONFIGURAÇÃO DE ROLES ---
-  create_iam_role = false
-  iam_role_arn    = local.used_cluster_role # Usa a role definida no topo
+  # --- CORREÇÃO CRÍTICA PARA O ERRO IAM:GetRole ---
+  # 1. Impede que o módulo tente ler sua role 'voclabs' (o que gera o erro 403)
+  bootstrap_cluster_creator_admin_permissions = false
 
+  # 2. Desativa o gerenciamento automático do aws-auth (faremos manual)
+  manage_aws_auth_configmap = false
+
+  # 3. Usa a LabRole existente (não cria nova)
+  create_iam_role = false
+  iam_role_arn    = local.used_cluster_role
+
+  # 4. Desativa recursos extras que o Academy bloqueia
   enable_irsa               = false
-  manage_aws_auth_configmap = false # Gerenciamos manualmente abaixo
+  create_kms_key            = false
+  cluster_encryption_config = {}
 
   eks_managed_node_groups = {
     default = {
@@ -66,14 +72,13 @@ module "eks" {
       capacity_type  = "ON_DEMAND"
 
       create_iam_role = false
-      iam_role_arn    = local.used_node_role # Usa a role definida no topo
+      iam_role_arn    = local.used_node_role
     }
   }
 }
 
-# --- AWS-AUTH (A Garantia de Acesso) ---
-# Aqui mapeamos TANTO a LabRole QUANTO a Role Específica.
-# Assim, qualquer uma que for usada terá permissão de entrar no cluster.
+# --- AWS-AUTH (Manual) ---
+# Adiciona permissão para a LabRole e para as Roles específicas entrarem no cluster
 resource "kubernetes_config_map" "aws_auth" {
   metadata {
     name      = "aws-auth"
@@ -82,18 +87,24 @@ resource "kubernetes_config_map" "aws_auth" {
 
   data = {
     mapRoles = yamlencode([
-      # Opção 1: LabRole (Padrão)
+      # Permite a LabRole (Genérica)
       {
         rolearn  = local.lab_role_arn
         username = "system:node:{{EC2PrivateDNSName}}"
         groups   = ["system:bootstrappers", "system:nodes"]
       },
-      # Opção 2: Role Específica de Node (Backup)
-      # Adicionamos preventivamente. Se os nodes usarem essa role, eles entram.
+      # Permite a Role Específica de Node (Backup)
       {
         rolearn  = local.specific_node_role
         username = "system:node:{{EC2PrivateDNSName}}"
         groups   = ["system:bootstrappers", "system:nodes"]
+      },
+      # Adiciona você (voclabs) como admin manualmente, sem usar GetRole
+      # Isso contorna o bloqueio de leitura, mas permite o acesso
+      {
+        rolearn  = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/voclabs"
+        username = "voclabs"
+        groups   = ["system:masters"]
       }
     ])
     mapUsers = yamlencode([])
