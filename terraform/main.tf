@@ -37,7 +37,7 @@ module "eks" {
       min_size       = 1
       max_size       = 2
       desired_size   = 2
-      instance_types = ["t3.medium"] # Econômico para o Lab
+      instance_types = ["t3.medium"]
       capacity_type  = "ON_DEMAND"
     }
   }
@@ -45,23 +45,29 @@ module "eks" {
 
 # --- RDS Postgres ---
 module "db" {
-  source = "terraform-aws-modules/rds/aws"
+  source  = "terraform-aws-modules/rds/aws"
+  version = "6.1.1" # Fixando a versão para evitar surpresas
 
   identifier = "health-flow-db"
 
   engine            = "postgres"
   engine_version    = "14"
-  instance_class    = "db.t3.micro" # Free tier eligible
+  instance_class    = "db.t3.micro"
   allocated_storage = 20
   db_name           = "healthflowdb"
   username          = "dbadmin"
-  password          = "Password123!" # Lab only
   port              = 5432
+
+  # CORREÇÃO CRÍTICA PARA O ERRO "PASSWORD":
+  # No módulo v6+, precisamos desativar o gerenciador de segredos para usar senha fixa
+  manage_master_user_password = false
+  password                    = "Password123!"
 
   vpc_security_group_ids = [module.vpc.default_security_group_id]
   subnet_ids             = module.vpc.public_subnets
   publicly_accessible    = true
   skip_final_snapshot    = true
+  family                 = "postgres14" # Necessário em algumas versões
 }
 
 # --- Nginx Ingress ---
@@ -72,7 +78,9 @@ resource "helm_release" "nginx_ingress" {
   namespace        = "nginx-system"
   create_namespace = true
   version          = "4.7.1"
-  depends_on       = [module.eks]
+
+  # Dependência explícita para garantir que o cluster exista antes do Helm rodar
+  depends_on = [module.eks]
 
   set {
     name  = "controller.service.type"
@@ -88,7 +96,8 @@ resource "helm_release" "argocd" {
   namespace        = "argocd"
   create_namespace = true
   version          = "5.46.7"
-  depends_on       = [module.eks]
+
+  depends_on = [module.eks]
 
   set {
     name  = "server.service.type"
