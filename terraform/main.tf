@@ -37,7 +37,7 @@ module "vpc" {
 # --- EKS Cluster ---
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "19.15.3"
+  version = "19.15.3" # Mantemos a versão 19 para estabilidade no Lab
 
   cluster_name    = "health-flow-cluster"
   cluster_version = "1.28"
@@ -47,18 +47,19 @@ module "eks" {
 
   cluster_endpoint_public_access = true
 
-  # --- CORREÇÃO CRÍTICA PARA O ERRO IAM:GetRole ---
-  # 1. Impede que o módulo tente ler sua role 'voclabs' (o que gera o erro 403)
-  bootstrap_cluster_creator_admin_permissions = false
+  # --- CONFIGURAÇÕES DE PERMISSÃO E ROLES ---
 
-  # 2. Desativa o gerenciamento automático do aws-auth (faremos manual)
+  # A LINHA QUE CAUSOU ERRO FOI REMOVIDA DAQUI.
+  # Na versão 19, apenas desativar o aws_auth abaixo já resolve o problema do usuário bloqueado.
+
+  # 1. Desativa o gerenciamento automático do aws-auth (faremos manual)
   manage_aws_auth_configmap = false
 
-  # 3. Usa a LabRole existente (não cria nova)
+  # 2. Usa a LabRole existente (não cria nova)
   create_iam_role = false
   iam_role_arn    = local.used_cluster_role
 
-  # 4. Desativa recursos extras que o Academy bloqueia
+  # 3. Desativa recursos extras que o Academy bloqueia
   enable_irsa               = false
   create_kms_key            = false
   cluster_encryption_config = {}

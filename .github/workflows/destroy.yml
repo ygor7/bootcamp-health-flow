@@ -1,0 +1,37 @@
+name: 🧨 Terraform Destroy (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'ATENÇÃO: Digite "DESTROY" para confirmar a exclusão total:'
+        required: true
+        default: 'NO'
+
+jobs:
+  destroy-infra:
+    name: 💣 Destroy Infrastructure
+    runs-on: ubuntu-latest
+    # Trava de segurança lógica: O job é cancelado se o input não for exato
+    if: ${{ github.event.inputs.confirmation == 'DESTROY' }}
+    
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_REGION: us-east-1
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init
+
+      - name: Terraform Destroy
+        working-directory: ./terraform
+        run: terraform destroy -auto-approve
