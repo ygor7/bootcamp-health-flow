@@ -1,14 +1,14 @@
 data "aws_availability_zones" "available" {}
 data "aws_caller_identity" "current" {}
 
-# --- DEFINIÇÃO DAS ROLES (Use as que você validou) ---
+# --- DEFINIÇÃO DAS ROLES ---
 locals {
-  # Insira aqui os ARNs exatos que você sabe que funcionam no Academy
+  # Insira os ARNs que funcionam no seu laboratório
   cluster_role_arn = "arn:aws:iam::074442581040:role/c196815a5042644l13691097t1w074442-LabEksClusterRole-z4U15qTttNJF"
   node_role_arn    = "arn:aws:iam::074442581040:role/c196815a5042644l13691097t1w074442581-LabEksNodeRole-gSRwpwgLZvgg"
 }
 
-# --- VPC (O módulo de VPC é seguro e funciona bem) ---
+# --- VPC ---
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "5.0.0"
@@ -27,8 +27,7 @@ module "vpc" {
   tags = { Project = "Health-Flow" }
 }
 
-# --- EKS CLUSTER (NATIVO - Sem Módulo) ---
-# Isso evita o erro de "iam:GetRole" pois não roda scripts ocultos
+# --- EKS CLUSTER (NATIVO) ---
 resource "aws_eks_cluster" "this" {
   name     = "health-flow-cluster"
   role_arn = local.cluster_role_arn
@@ -58,13 +57,12 @@ resource "aws_eks_node_group" "this" {
   instance_types = ["t3.medium"]
   capacity_type  = "ON_DEMAND"
 
-  # Garante que o cluster esteja ativo antes de criar os nós
   depends_on = [aws_eks_cluster.this]
 
   tags = { Project = "Health-Flow" }
 }
 
-# --- OIDC PROVIDER (Necessário para addons) ---
+# --- OIDC PROVIDER ---
 data "tls_certificate" "this" {
   url = aws_eks_cluster.this.identity[0].oidc[0].issuer
 }
@@ -75,7 +73,7 @@ resource "aws_iam_openid_connect_provider" "this" {
   url             = aws_eks_cluster.this.identity[0].oidc[0].issuer
 }
 
-# --- RDS Postgres (Módulo Seguro) ---
+# --- RDS POSTGRES (CORRIGIDO) ---
 module "db" {
   source  = "terraform-aws-modules/rds/aws"
   version = "6.1.1"
@@ -90,6 +88,9 @@ module "db" {
   username          = "dbadmin"
   port              = 5432
 
+  # --- CORREÇÃO DO ERRO 'FAMILY' ---
+  family = "postgres14" # Obrigatório na versão 6+
+
   manage_master_user_password = false
   password                    = "Password123!"
 
@@ -99,7 +100,7 @@ module "db" {
   skip_final_snapshot    = true
 }
 
-# --- HELM: Nginx Ingress ---
+# --- HELM: Ingress ---
 resource "helm_release" "nginx_ingress" {
   name             = "nginx-ingress"
   repository       = "https://kubernetes.github.io/ingress-nginx"
@@ -108,7 +109,6 @@ resource "helm_release" "nginx_ingress" {
   create_namespace = true
   version          = "4.7.1"
 
-  # Espera os nós estarem prontos
   depends_on = [aws_eks_node_group.this]
 
   set {
@@ -134,59 +134,17 @@ resource "helm_release" "argocd" {
   }
 }
 
-# --- ARGO APPS ---
-resource "kubernetes_manifest" "app_core" {
+# --- DEPLOY DAS APPS (VIA SCRIPT) ---
+# Substitui o kubernetes_manifest para evitar erros de conexão no plano
+resource "null_resource" "deploy_apps" {
   depends_on = [helm_release.argocd]
-  manifest = {
-    apiVersion = "argoproj.io/v1alpha1"
-    kind       = "Application"
-    metadata = {
-      name      = "health-flow-core"
-      namespace = "argocd"
-    }
-    spec = {
-      project = "default"
-      source = {
-        repoURL        = var.github_repo_url
-        targetRevision = "HEAD"
-        path           = "k8s/core"
-      }
-      destination = {
-        server    = "https://kubernetes.default.svc"
-        namespace = "health-core"
-      }
-      syncPolicy = {
-        automated   = { prune = true, selfHeal = true }
-        syncOptions = ["CreateNamespace=true"]
-      }
-    }
-  }
-}
 
-resource "kubernetes_manifest" "app_video" {
-  depends_on = [helm_release.argocd]
-  manifest = {
-    apiVersion = "argoproj.io/v1alpha1"
-    kind       = "Application"
-    metadata = {
-      name      = "health-flow-video"
-      namespace = "argocd"
-    }
-    spec = {
-      project = "default"
-      source = {
-        repoURL        = var.github_repo_url
-        targetRevision = "HEAD"
-        path           = "k8s/video"
-      }
-      destination = {
-        server    = "https://kubernetes.default.svc"
-        namespace = "health-video"
-      }
-      syncPolicy = {
-        automated   = { prune = true, selfHeal = true }
-        syncOptions = ["CreateNamespace=true"]
-      }
-    }
+  provisioner "local-exec" {
+    # Atualiza o kubeconfig e aplica os arquivos YAML
+    command = <<EOT
+      aws eks update-kubeconfig --region us-east-1 --name ${aws_eks_cluster.this.name}
+      kubectl apply -f ../k8s/core/
+      kubectl apply -f ../k8s/video/
+    EOT
   }
 }
