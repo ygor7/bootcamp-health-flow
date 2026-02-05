@@ -3,7 +3,7 @@ data "aws_caller_identity" "current" {}
 
 # --- DEFINIÇÃO DAS ROLES ---
 locals {
-  # Ajuste os ARNs conforme o seu ambiente Academy
+  # ARNs do Academy
   cluster_role_arn = "arn:aws:iam::074442581040:role/c196815a5042644l13691097t1w074442-LabEksClusterRole-z4U15qTttNJF"
   node_role_arn    = "arn:aws:iam::074442581040:role/c196815a5042644l13691097t1w074442581-LabEksNodeRole-gSRwpwgLZvgg"
 }
@@ -27,17 +27,17 @@ module "vpc" {
   tags = { Project = "Health-Flow" }
 }
 
-# --- SEGURANÇA: SG PARA O BANCO DE DADOS (Correção do erro de VPC) ---
+# --- SEGURANÇA: SG PARA O BANCO DE DADOS ---
 resource "aws_security_group" "db_sg" {
   name        = "health-flow-db-sg"
   description = "Permite acesso ao RDS"
-  vpc_id      = module.vpc.vpc_id # Força o SG a ficar na VPC certa
+  vpc_id      = module.vpc.vpc_id # Garante a VPC certa
 
   ingress {
     from_port   = 5432
     to_port     = 5432
     protocol    = "tcp"
-    cidr_blocks = ["10.0.0.0/16"] # Permite acesso de dentro da VPC
+    cidr_blocks = ["10.0.0.0/16"]
   }
 
   egress {
@@ -52,7 +52,7 @@ resource "aws_security_group" "db_sg" {
 resource "aws_eks_cluster" "this" {
   name     = "health-flow-cluster"
   role_arn = local.cluster_role_arn
-  version  = "1.32" # Atualizado para evitar erro de AMI
+  version  = "1.32"
 
   vpc_config {
     subnet_ids             = module.vpc.private_subnets
@@ -75,7 +75,6 @@ resource "aws_eks_node_group" "this" {
     min_size     = 1
   }
 
-  # Removida a versão explícita para pegar a mesma do cluster automaticamente
   instance_types = ["t3.medium"]
   capacity_type  = "ON_DEMAND"
 
@@ -83,9 +82,6 @@ resource "aws_eks_node_group" "this" {
 
   tags = { Project = "Health-Flow" }
 }
-
-# --- REMOVIDO OIDC PROVIDER (Bloqueado no Academy) ---
-# O bloco aws_iam_openid_connect_provider foi deletado para corrigir o erro 403.
 
 # --- RDS POSTGRES ---
 module "db" {
@@ -107,9 +103,10 @@ module "db" {
   manage_master_user_password = false
   password                    = "Password123!"
 
-  # Usamos o SG criado manualmente acima para garantir o match de VPC
-  vpc_security_group_ids = [aws_security_group.db_sg.id]
+  # Força a criação do grupo de subnets para evitar usar o default da VPC errada
+  create_db_subnet_group = true
   subnet_ids             = module.vpc.public_subnets
+  vpc_security_group_ids = [aws_security_group.db_sg.id]
 
   publicly_accessible = true
   skip_final_snapshot = true
@@ -149,14 +146,14 @@ resource "helm_release" "argocd" {
   }
 }
 
-# --- HELM: Datadog ---
+# --- HELM: Datadog (Versão Corrigida) ---
 resource "helm_release" "datadog" {
   name             = "datadog"
   repository       = "https://helm.datadoghq.com"
   chart            = "datadog"
   namespace        = "datadog"
   create_namespace = true
-  version          = "3.58.0"
+  version          = "3.48.0" # Versão estável conhecida
 
   depends_on = [aws_eks_node_group.this]
 
@@ -191,13 +188,16 @@ resource "helm_release" "datadog" {
   }
 }
 
-# --- DEPLOY APPS ---
+# --- DEPLOY APPS (Com criação de Namespace) ---
 resource "null_resource" "deploy_apps" {
   depends_on = [helm_release.argocd]
 
   provisioner "local-exec" {
+    # Adicionado 'kubectl create ns' para corrigir o erro 'namespace not found'
     command = <<EOT
       aws eks update-kubeconfig --region us-east-1 --name ${aws_eks_cluster.this.name}
+      kubectl create namespace health-core || true
+      kubectl create namespace health-video || true
       kubectl apply -f ../k8s/core/
       kubectl apply -f ../k8s/video/
     EOT
