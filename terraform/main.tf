@@ -1,16 +1,16 @@
 data "aws_availability_zones" "available" {}
 data "aws_caller_identity" "current" {}
 
-# --- DEFINIÇÃO DAS ROLES ---
+# --- DEFINIÇÃO DAS ROLES (Estratégia de Backup) ---
 locals {
-  # Role Padrão do Academy
+  # 1. Role Padrão do Academy
   lab_role_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/LabRole"
 
-  # Roles Específicas (Backup)
+  # 2. Roles Específicas (Backup de Segurança)
   specific_cluster_role = "arn:aws:iam::074442581040:role/c196815a5042644l13691097t1w074442-LabEksClusterRole-z4U15qTttNJF"
   specific_node_role    = "arn:aws:iam::074442581040:role/c196815a5042644l13691097t1w074442581-LabEksNodeRole-gSRwpwgLZvgg"
 
-  # Configuração Ativa (Padrão: LabRole)
+  # Altere aqui caso precise trocar a Role
   used_cluster_role = local.lab_role_arn
   used_node_role    = local.lab_role_arn
 }
@@ -34,10 +34,10 @@ module "vpc" {
   tags = { Project = "Health-Flow" }
 }
 
-# --- EKS Cluster ---
+# --- EKS Cluster (Versão 20 - Blindada para Academy) ---
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "19.15.3" # Mantemos a versão 19 para estabilidade no Lab
+  version = "~> 20.0" # ATUALIZAÇÃO IMPORTANTE
 
   cluster_name    = "health-flow-cluster"
   cluster_version = "1.28"
@@ -47,22 +47,19 @@ module "eks" {
 
   cluster_endpoint_public_access = true
 
-  # --- CONFIGURAÇÕES DE PERMISSÃO E ROLES ---
+  # --- CORREÇÃO DO ERRO IAM:GetRole ---
+  # Isso impede o módulo de tentar ler seu usuário 'voclabs'
+  enable_cluster_creator_admin_permissions = false
 
-  # A LINHA QUE CAUSOU ERRO FOI REMOVIDA DAQUI.
-  # Na versão 19, apenas desativar o aws_auth abaixo já resolve o problema do usuário bloqueado.
+  # Permite usar o aws-auth manual (ConfigMap) junto com a API nova
+  authentication_mode = "API_AND_CONFIG_MAP"
 
-  # 1. Desativa o gerenciamento automático do aws-auth (faremos manual)
-  manage_aws_auth_configmap = false
-
-  # 2. Usa a LabRole existente (não cria nova)
+  # Configurações do Academy (Roles existentes)
   create_iam_role = false
   iam_role_arn    = local.used_cluster_role
 
-  # 3. Desativa recursos extras que o Academy bloqueia
-  enable_irsa               = false
-  create_kms_key            = false
-  cluster_encryption_config = {}
+  create_kms_key = false
+  enable_irsa    = false
 
   eks_managed_node_groups = {
     default = {
@@ -78,8 +75,8 @@ module "eks" {
   }
 }
 
-# --- AWS-AUTH (Manual) ---
-# Adiciona permissão para a LabRole e para as Roles específicas entrarem no cluster
+# --- AWS-AUTH (Acesso Manual Obrigatório) ---
+# Como desligamos o admin automático acima, precisamos nos adicionar manualmente aqui
 resource "kubernetes_config_map" "aws_auth" {
   metadata {
     name      = "aws-auth"
@@ -88,20 +85,19 @@ resource "kubernetes_config_map" "aws_auth" {
 
   data = {
     mapRoles = yamlencode([
-      # Permite a LabRole (Genérica)
+      # Permite os nós com LabRole
       {
         rolearn  = local.lab_role_arn
         username = "system:node:{{EC2PrivateDNSName}}"
         groups   = ["system:bootstrappers", "system:nodes"]
       },
-      # Permite a Role Específica de Node (Backup)
+      # Permite os nós com Role Específica (Backup)
       {
         rolearn  = local.specific_node_role
         username = "system:node:{{EC2PrivateDNSName}}"
         groups   = ["system:bootstrappers", "system:nodes"]
       },
-      # Adiciona você (voclabs) como admin manualmente, sem usar GetRole
-      # Isso contorna o bloqueio de leitura, mas permite o acesso
+      # Adiciona o usuário voclabs como Admin manualmente
       {
         rolearn  = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/voclabs"
         username = "voclabs"
