@@ -14,6 +14,7 @@ terraform {
     }
   }
   
+  
   # --- BACKEND S3 (Para salvar o estado) ---
   backend "s3" {
     # ATENÇÃO: Este bucket DEVE existir previamente na AWS.
