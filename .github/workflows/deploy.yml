@@ -88,7 +88,9 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
       AWS_REGION: us-east-1
-    
+      # Isso pega o secret do GitHub e entrega para o Terraform como variável de ambiente
+      TF_VAR_datadog_api_key: ${{ secrets.TF_VAR_datadog_api_key }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v3
