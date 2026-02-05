@@ -1,12 +1,19 @@
 output "cluster_endpoint" {
-  value = module.eks.cluster_endpoint
+  description = "Endpoint for EKS control plane"
+  value       = aws_eks_cluster.this.endpoint
 }
+
 output "db_endpoint" {
-  value = module.db.db_instance_endpoint
+  description = "Endpoint for RDS instance"
+  value       = module.db.db_instance_endpoint
 }
+
 output "configure_kubectl" {
-  value = "aws eks update-kubeconfig --region us-east-1 --name health-flow-cluster"
+  description = "Configure kubectl: run this command in your terminal"
+  value       = "aws eks update-kubeconfig --region us-east-1 --name ${aws_eks_cluster.this.name}"
 }
-output "argocd_password" {
-  value = "kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
+
+output "argocd_password_command" {
+  description = "Command to get ArgoCD admin password"
+  value       = "kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
 }
