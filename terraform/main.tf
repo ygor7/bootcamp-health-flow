@@ -4,8 +4,8 @@ data "aws_caller_identity" "current" {}
 # --- DEFINIÇÃO DAS ROLES ---
 locals {
   # ARNs do Academy
-  cluster_role_arn = "arn:aws:iam::074442581040:role/c196815a5042644l13691097t1w074442-LabEksClusterRole-z4U15qTttNJF"
-  node_role_arn    = "arn:aws:iam::074442581040:role/c196815a5042644l13691097t1w074442581-LabEksNodeRole-gSRwpwgLZvgg"
+  cluster_role_arn = "arn:aws:iam::092257582592:role/c196815a5042644l13705335t1w092257-LabEksClusterRole-NAOZccg6RpK2"
+  node_role_arn    = "arn:aws:iam::092257582592:role/c196815a5042644l13705335t1w092257582-LabEksNodeRole-8H5Iu2WsUOUe"
 }
 
 # --- VPC ---
