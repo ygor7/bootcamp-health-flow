@@ -153,40 +153,28 @@ resource "helm_release" "datadog" {
   chart            = "datadog"
   namespace        = "datadog"
   create_namespace = true
-  version          = "3.48.0" # Versão estável conhecida
+  version          = "3.48.0"
 
   depends_on = [aws_eks_node_group.this]
+
+  wait    = true
+  atomic  = true
+  cleanup_on_fail = true
+  timeout = 1800  # 30 minutos (EKS + nodes + pull de imagens pode demorar em academy)
 
   set_sensitive {
     name  = "datadog.apiKey"
     value = var.datadog_api_key
   }
 
-  set {
-    name  = "datadog.site"
-    value = "datadoghq.com"
-  }
-  set {
-    name  = "datadog.logs.enabled"
-    value = "true"
-  }
-  set {
-    name  = "datadog.logs.containerCollectAll"
-    value = "true"
-  }
-  set {
-    name  = "clusterAgent.enabled"
-    value = "true"
-  }
-  set {
-    name  = "clusterAgent.metricsProvider.enabled"
-    value = "true"
-  }
-  set {
-    name  = "kubeStateMetricsCore.enabled"
-    value = "true"
-  }
+  set { name = "datadog.site" value = "datadoghq.com" }
+  set { name = "datadog.logs.enabled" value = "true" }
+  set { name = "datadog.logs.containerCollectAll" value = "true" }
+  set { name = "clusterAgent.enabled" value = "true" }
+  set { name = "clusterAgent.metricsProvider.enabled" value = "true" }
+  set { name = "kubeStateMetricsCore.enabled" value = "true" }
 }
+
 
 # --- DEPLOY APPS (Com criação de Namespace) ---
 resource "null_resource" "deploy_apps" {

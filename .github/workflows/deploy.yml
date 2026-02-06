@@ -110,6 +110,16 @@ jobs:
         working-directory: ./terraform
         run: terraform plan
 
+      # 1. Adicionamos 'id: apply' aqui para rastrear este passo
       - name: Terraform Apply
+        id: apply
         working-directory: ./terraform
         run: terraform apply -auto-approve
+
+      # 2. Novo passo: Só roda se o Apply falhar
+      - name: 🚨 Rollback (Destroy on Failure)
+        if: failure() && steps.apply.outcome == 'failure'
+        working-directory: ./terraform
+        run: |
+          echo "O Apply falhou! Iniciando destruição automática para economizar créditos..."
+          terraform destroy -auto-approve
